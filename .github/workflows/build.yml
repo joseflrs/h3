@@ -1,0 +1,163 @@
+name: v1-ubuntu-hardware-accelerator
+
+on:
+  workflow_dispatch:
+   inputs:
+      mesa_source:
+        description: 'Mesaのソースコードを選択'
+        required: true
+        default: 'upstream'
+        type: choice
+        options:
+          - upstream
+          - ubuntu
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write  # これがリリース作成に必要
+
+jobs:
+  build_rootfs:
+    runs-on: ubuntu-24.04-arm
+    outputs: 
+      shared_value: ${{ steps.set_output.outputs.RELEASE_MESA_INFO }}    
+    steps:
+      - uses: actions/checkout@main
+    # 2. ローカルと共通のBASHスクリプトを実行   Mesa deb
+      - name: Run local build script
+        env: 
+           MESA_SOURCE: ${{ github.event.inputs.mesa_source }}
+        run: |
+          chmod +x ./meas-build-env.sh
+          sudo ./meas-build-env.sh arm64
+
+      - name: kernel
+        run: /bin/bash ./build-kernel.sh arm64 2>&1|tee log1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static debootstrap # 必要なものを列挙
+
+      - name: Load Release Info from File     
+        run: |
+           if [ -f rel.txt ]; then
+            cat rel.txt > tmp_memo
+            rm rel.txt  # 👈 変数に入れたら即座にファイルを消去してクリーンアップ！
+           else
+            echo "Unknown Mesa Build" > tmp_memo
+           fi
+      - id: set_outputs
+        run:  echo "RELEASE_MESA_INFO=$tmp_memo" >> $GITHUB_OUTPUT
+
+
+      - name: Build rootfs tarball
+        run: |
+           # Mesa deb
+            chmod +x mesa-bootstrap.sh
+            sudo ./mesa-bootstrap.sh arm64
+            # Mesa build
+            #chmod +x u-bootstrap.sh
+            #sudo ./u-bootstrap.sh arm64
+            # ubuntu-image
+            #chmod +x ubuntu-image.sh
+            #sudo ./ubuntu-image.sh
+            # ここで rootfs.tar.xz などができる想定
+
+      - name: Upload rootfs artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: ubuntu.rootfs.tar.gz
+          path: . # 作成されたファイルのパスを指定
+
+  build:
+      needs: build_rootfs # rootfsが終わるまで待つ
+      name: Build for ${{ matrix.model }}
+      runs-on: ubuntu-24.04-arm
+      strategy:
+       fail-fast: false
+       matrix:
+        include:
+         - model: nanopi-r6c
+           defconfig: nanopi-r6c-rk3588s_defconfig
+           dtb: rk3588s-nanopi-r6c
+
+      steps:
+      - name: Checkout
+        uses: actions/checkout@main
+      - name: u-boot
+      # matrix から defconfig と suffix を取得して実行
+        run: /bin/bash ./das-u-boot.sh ${{ matrix.defconfig }}
+        
+      - name: Download rootfs artifact
+        uses: actions/download-artifact@main
+        with:
+           name: ubuntu.rootfs.tar.gz
+           path: ./
+
+      - name: disk image
+        run: |
+          chmod +x disk_image.sh
+          # GitHubのホスト環境とchroot(25.10)のセキュリティ不整合を回避する環境変数を付与
+          #export SYSTEMD_SECCOMP=0    
+          # 確実に特権(完全なroot)として、環境変数を維持したまま実行
+          #sudo --preserve-env=SYSTEMD_SECCOMP ./disk_image.sh arm64 ${{ matrix.model }} ${{ matrix.dtb }}
+          
+           sudo ./disk_image.sh arm64 ${{ matrix.model }} ${{ matrix.dtb }}
+
+      - name: Rename files to avoid conflict
+        run: |
+          # リリース時に混ざらないよう、成果物を1つのフォルダに集めます
+          mkdir final_assets
+          # .imgファイルを移動（もし拡張子が違う場合は適宜修正してください）
+          mv *.img* final_assets/ || true
+          # リネームしたu-bootなども移動
+          mv u-boot-rockchip.bin final_assets/u-boot-rockchip-${{ matrix.model }}.bin || true
+          if [ -f sd-card.txt ]; then mv sd-card.txt final_assets/sd-card-${{ matrix.model }}.txt; fi
+
+
+      # ここで一時保存（これが終わるとこのジョブのデータは消えるので artifact に預ける）
+      - name: Upload artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: build-artifacts-${{ matrix.model }}
+          path: final_assets/
+          retention-days: 1
+
+  release:
+    needs: [ build , build_rootfs ]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@main
+        env: 
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+        with:
+          path: release-assets
+          pattern: build-artifacts-*
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@master
+        with:
+          # タグ名を固定ではなく、確実に新しいものにする
+          tag_name: v1.0.${{ github.run_number }}
+          name: Release Build ${{ github.run_number }}
+          # 👇 ここでスクリプトから受け取った変数（RELEASE_MESA_INFO）を埋め込みます
+          body: |
+          steps:
+                ${{ needs.build_rootfs.outputs.shared_value }}
+          files: release-assets/**/*
+          draft: false
+          prerelease: false
+          # 権限問題を回避するための設定
+          generate_release_notes: true
+        env:
+           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
