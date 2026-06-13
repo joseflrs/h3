@@ -22,16 +22,16 @@ jobs:
   build_rootfs:
     runs-on: ubuntu-24.04-arm
     outputs: 
-      shared_value: ${{ steps.set_output.outputs.RELEASE_MESA_INFO }}    
+      shared_value: ${{ steps.mesa_rel.outputs.RELEASE_MESA_INFO }}    
     steps:
       - uses: actions/checkout@main
     # 2. ローカルと共通のBASHスクリプトを実行   Mesa deb
       - name: Run local build script
         env: 
-           MESA_SOURCE: ${{ github.event.inputs.mesa_source }}
+           mesa_source: ${{ github.event.inputs.mesa_source }}
         run: |
-          chmod +x ./meas-build-env.sh
-          sudo ./meas-build-env.sh arm64
+          chmod +x ./meas-build-env.sh 
+          sudo ./meas-build-env.sh arm64 $mesa_source
 
       - name: kernel
         run: /bin/bash ./build-kernel.sh arm64 2>&1|tee log1
@@ -45,12 +45,12 @@ jobs:
         run: |
            if [ -f rel.txt ]; then
             cat rel.txt > tmp_memo
-            rm rel.txt  # 👈 変数に入れたら即座にファイルを消去してクリーンアップ！
+            #rm rel.txt  # 👈 変数に入れたら即座にファイルを消去してクリーンアップ！
            else
             echo "Unknown Mesa Build" > tmp_memo
            fi
-      - id: set_outputs
-        run:  echo "RELEASE_MESA_INFO=$tmp_memo" >> $GITHUB_OUTPUT
+      - id: mesa_rel
+        run:  echo "RELEASE_MESA_INFO=$(cat rel.txt)" >> $GITHUB_OUTPUT
 
 
       - name: Build rootfs tarball
