@@ -104,7 +104,7 @@ setup_mountpoint $chroot_dir
 chroot $1 apt-get update
 chroot $1 apt-get -y upgrade
 chroot $1 apt-get -y dist-upgrade
-chroot $1 apt-get -y install ubuntu-desktop-minimal gdm3 linux-firmware snapd cloud-initramfs-growroot oem-config-gtk ubiquity-frontend-gtk ubiquity-slideshow-ubuntu yaru-theme-unity yaru-theme-icon yaru-theme-gtk aptdaemon initramfs-tools vim
+chroot $1 apt-get -y install ubuntu-desktop-minimal gdm3 linux-firmware snapd initramfs-tools vim
 chroot $1 apt-get -y install  build-essential gcc-aarch64-linux-gnu bison \
 qemu-user-binfmt qemu-system-arm qemu-efi-aarch64 binfmt-support \
 debootstrap flex libssl-dev bc rsync kmod cpio xz-utils fakeroot parted \
@@ -132,12 +132,13 @@ libclc-21-dev llvm-21-dev libllvmspirvlib-21-dev libclang-cpp21-dev libclang-21-
 #echo "--------------- build-dep -y mesa end  ----------------------"
 
 # デフォルト値を設定（未指定ならubuntu）
-MESA_SOURCE="${MESA_SOURCE:-ubuntu}"
+MESA_SOURCE="${mesa_source:-ubuntu}"
 
 
 
 echo "=== 1. Mesaソースコードの取得 ==="
-if [ "${MESA_SOURCE}" = "upstream" ]; then
+echo "mesa_source=$2"
+if [ "$2" == "upstream" ]; then
     echo "freedesktop staging/26.0 から取得します..."
 	# mesa staging 26.0 version
 	cp staging_panthor_mesa.sh libdrm-amdgpu1.symbols.patch $1 && chmod +x $1/staging_panthor_mesa.sh
@@ -148,8 +149,8 @@ else
 	chroot $1 /build_panthor_mesa.sh
 fi
 cp $1/*.deb .
-cp $1/rel.txt .
-ls *.deb
+chown -R runner:runner $1/rel.txt && cp $1/rel.txt .
+ls *.deb *.txt
 teardown_mountpoint $chroot_dir
 if [ $mem_size -gt 10 ]; then
 	umount $chroot_dir
