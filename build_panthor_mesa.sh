@@ -25,7 +25,7 @@ apt-get source libdrm
 cd libdrm-*/
 
 # 4. パッケージをビルドする（署名はスキップ）
-dpkg-buildpackage -us -uc -b
+DEB_BUILD_OPTIONS="noautodbgsym" dpkg-buildpackage -us -uc -b
 
 # 5. 1つ上のディレクトリに .deb ファイルが生成されるので、それをインストール
 cd ..
@@ -74,13 +74,13 @@ sudo ln -sf /usr/local/bin/meson /usr/bin/meson
 apt source mesa
 MESA_SRC_DIR=$(ls -d mesa-*)
 cd "$MESA_SRC_DIR"
-
+mesa_version=$( echo $MESA_SRC_DIR | sed 's/mesa-//' )
 ### === 【追加】debian/changelog の自動書き換え ===
 echo "=== 2.5. debian/changelog の自動書き換え (Panthorバージョン化) ==="
 # Ubuntu 26.04 (resolute) の場合を想定しています。お使いのバージョンに合わせて noble を変更してください。
 # エディタを開かずに、非対話で changelog の先頭にカスタムバージョンを追加します。
 DEBEMAIL="opi5plus@bcc.example.com" DEBFULLNAME="hakotani-o" \
-dch -b --newversion "26.0.3-1ubuntu1~panthor1" \
+dch -b --newversion "${mesa_version}-1ubuntu1~panthor1" \
     --distribution resolute \
     --force-distribution \
     "Build for Panthor GPU support with optimization"
@@ -122,12 +122,12 @@ echo "=== 4. パッケージバージョンの変更 (自動上書き防止) ===
 CURRENT_VERSION=$(dpkg-parsechangelog -S Version)
 export DEBEMAIL="user@localhost"
 export DEBFULLNAME="Panthor Builder"
-debchange --force-bad-version --newversion "${CURRENT_VERSION}~panthor1" "Custom Panthor-only build without heavy dependencies"
+debchange --force-bad-version --newversion "${CURRENT_VERSION}+panthor1" "Custom Panthor-only build without heavy dependencies"
 
 echo "=== 5. 依存チェックを無視してビルド実行 ==="
 # -d フラグで不要なビルド依存（Intel/AMD用ライブラリなど）のチェックをスキップ
 # ビルド情報の整理
-DEB_BUILD_OPTIONS="terse" debuild -us -uc -b -d
+DEB_BUILD_OPTIONS="terse noautodbgsym" debuild -us -uc -b -d
 
 echo "=== 6. ビルド完了 ==="
 DETECTED_VERSION=$(dpkg-parsechangelog -S Version)
